@@ -34,7 +34,7 @@
   "//comment": "dimensional parameters for NN, k_dist is the dimension of distribution",
   "n_input": 13,
   "k_dist": 10,
-  "n_p_output": 1,
+  "n_p_output": 2,
   "n_v_output": 1,
   "n1_p": 24,
   "n2_p": 24,
