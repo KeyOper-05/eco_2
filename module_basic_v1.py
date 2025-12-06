@@ -379,4 +379,14 @@ def enforce_boundary(x, min_val, max_val, lambda_penalty):
 def contains_nan(tensor):
     return torch.isnan(tensor).any().item()
 
+# module_basic_v1.py (在文件末尾添加以下函数)
+
+def fischer_burmeister(a, b):
+    """
+    Fischer-Burmeister function: psi(a, b) = a + b - sqrt(a^2 + b^2)
+    It satisfies psi(a, b) = 0 <=> a >= 0, b >= 0, ab = 0
+    Used for KKT conditions in Euler equation method.
+    """
+    # 1e-8 added for numerical stability to prevent NaN gradients
+    return a + b - torch.sqrt(a**2 + b**2 + 1e-8)
 

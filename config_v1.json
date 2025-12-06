@@ -121,5 +121,12 @@
   "n_z_sample": 10,
   "n_sim_path": 5501,
   "n_sim_step": 100,
-  "n_burn": 5400
+  "n_burn": 5400,
+
+  "//comment": "NEW EULER METHOD CONFIG",
+  "solver_method": "euler", 
+  "// options": "bellman or euler",
+  "lr_euler": 0.0001,
+  "n_euler_epochs": 200,
+  "n_mc_samples": 10
 }

@@ -22,9 +22,11 @@ import torch
 import os
 from datetime import datetime
 import matplotlib.pyplot as plt
-import module_obj_bellman_v1
-from module_basic_v1 import Config, MyModel, plot_equm_funcs
+import module_basic_v1
+from module_basic_v1 import Config, MyModel, plot_equm_funcs, DomainSampling
 from module_training_bellman_v1 import EqumTrainer as BellmanTrainer
+import module_training_euler_v1
+import module_obj_bellman_v1
 
 # when import the saved models from the expand_model_v1,
 # need to use "load_pretrained_new" to load the model as the way to save is a little different
@@ -71,43 +73,72 @@ dist_a_mid_values = config.dist_a_mid
 dist_a_mid = torch.tensor(dist_a_mid_values).unsqueeze(1).to(device)
 dist_a_mesh = dist_a_mid_values[1] - dist_a_mid_values[0]
 
-for i_iter in range(config.num_iter):
-    print('iter:', i_iter)
+if config.solver_method == "bellman":
+    print(">>> Selected Solver: BELLMAN ITERATION")
+    for i_iter in range(config.num_iter):
+        print('iter:', i_iter)
 
-    config.dist_a_band = config.dist_a_band + 0.3 / config.num_iter
+        config.dist_a_band = config.dist_a_band + 0.3 / config.num_iter
 
-    if i_iter == 0:
-        i_save_iter = 1
-        i_load_pretrainted = config.i_pretrainted
-        #+++++++++++++++++++++++++++
-        # simulate the model first:
+        if i_iter == 0:
+            i_save_iter = 1
+            i_load_pretrainted = config.i_pretrainted
+            #+++++++++++++++++++++++++++
+            # simulate the model first:
+            decision_trainer = instantiate_trainer(config.i_training, model, config.model_number_input, i_save_iter,
+                                                use_pretrained=i_load_pretrainted)
+            model = decision_trainer.get_pretrained_model()
+            equm_updater = module_obj_bellman_v1.define_objective(model, device)
+            domain_sampler = decision_trainer.get_domain_sampler()
+            initial_data = domain_sampler.generate_samples(1, config.k_dist)
+            equm_updater.sim_path(initial_data, config.n_sim_path, dist_a_mid, dist_a_mesh)
+
+        else:
+            i_save_iter = 1
+            i_load_pretrainted = 0
+
+        # training starts:
+        '''bellman equation based'''
+        # double check the value of "config.model_number_input"
         decision_trainer = instantiate_trainer(config.i_training, model, config.model_number_input, i_save_iter,
-                                               use_pretrained=i_load_pretrainted)
-        model = decision_trainer.get_pretrained_model()
-        equm_updater = module_obj_bellman_v1.define_objective(model, device)
-        domain_sampler = decision_trainer.get_domain_sampler()
-        initial_data = domain_sampler.generate_samples(1, config.k_dist)
-        equm_updater.sim_path(initial_data, config.n_sim_path, dist_a_mid, dist_a_mesh)
+                                            use_pretrained=i_load_pretrainted)
+        model = decision_trainer.policy_bellman_training(config.n_p_sim, dist_a_mid, dist_a_mesh)
+        model = decision_trainer.value_training(config.n_v_sim, dist_a_mid, dist_a_mesh)
 
-    else:
-        i_save_iter = 1
-        i_load_pretrainted = 0
-
-    # training starts:
-    '''bellman equation based'''
-    # double check the value of "config.model_number_input"
-    decision_trainer = instantiate_trainer(config.i_training, model, config.model_number_input, i_save_iter,
-                                           use_pretrained=i_load_pretrainted)
-    model = decision_trainer.policy_bellman_training(config.n_p_sim, dist_a_mid, dist_a_mesh)
-    model = decision_trainer.value_training(config.n_v_sim, dist_a_mid, dist_a_mesh)
-
+        num_samples = 10000
+        plotter = plot_equm_funcs(num_samples, config.k_dist, dist_a_mid, model, device)
+        plotter.create_plot()
+elif config.solver_method == "euler":
+    print(">>> Selected Solver: EULER RESIDUAL MINIMIZATION")
+    # Instantiate New Trainer
+    euler_trainer = module_training_euler_v1.EulerTrainer(
+        model, device=device, i_save=config.i_save
+    )
+    model = euler_trainer.train_policy(
+        num_epochs=config.n_euler_epochs,
+        n_mc_samples=config.n_mc_samples,
+        dist_a_mid=dist_a_mid
+    )
+    # Plotting results
+    print("Plotting Euler results...")
     num_samples = 10000
     plotter = plot_equm_funcs(num_samples, config.k_dist, dist_a_mid, model, device)
     plotter.create_plot()
 
+
 # simluate and plot the path
+print("Running Simulation Path...")
+
+# 1. 定义目标函数对象 (用于模拟路径)
+# 这一步是为了使用 bellman 模块中写好的 sim_path 和 aggregate 计算逻辑
 equm_updater = module_obj_bellman_v1.define_objective(model, device)
-domain_sampler = decision_trainer.get_domain_sampler()
+
+# 2. 获取采样器 (修复点)
+# 不要使用 decision_trainer.get_domain_sampler()，因为 euler 模式下没有 decision_trainer
+# 我们直接利用 equm_updater 中的 ranges 重新实例化一个采样器
+domain_sampler = module_basic_v1.DomainSampling(equm_updater.ranges, device=device)
+
+# 3. 生成初始状态并模拟
 initial_data = domain_sampler.generate_samples(1, config.k_dist)
 equm_updater.sim_path(initial_data, config.n_sim_path, dist_a_mid, dist_a_mesh)
 
