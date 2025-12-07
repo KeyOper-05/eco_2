@@ -25,7 +25,7 @@
   "n_v_sim": 50,
   "n_p_sim": 50,
   "batch_size_v": 128,
-  "batch_size_p": 128,
+  "batch_size_p": 1024,
 
   "//": "params to bound the Sigmoid, as the scale difference b/t state variables can cause problem",
   "x_low": 0.01,
@@ -36,8 +36,8 @@
   "k_dist": 10,
   "n_p_output": 2,
   "n_v_output": 1,
-  "n1_p": 24,
-  "n2_p": 24,
+  "n1_p": 128,
+  "n2_p": 128,
   "n1_v": 24,
   "n2_v": 24,
 
@@ -113,7 +113,7 @@
   "//": "# of samples for Monte Carlo simulation to compute the expected V",
   "eu_samples": 10,
   "i_training": 1,
-  "l2_penalty": 0.00001,
+  "l2_penalty": 0.000002,
 
   "u_eps": 0.001,
 
@@ -126,7 +126,7 @@
   "//comment": "NEW EULER METHOD CONFIG",
   "solver_method": "euler", 
   "// options": "bellman or euler",
-  "lr_euler": 0.0001,
+  "lr_euler": 0.001,
   "n_euler_epochs": 400,
   "n_mc_samples": 100
 }

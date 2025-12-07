@@ -45,7 +45,7 @@ class EulerTrainer:
         
         # Optimizer with Weight Decay
         optimizer = optim.Adam(params, lr=config.lr_euler, weight_decay=l2_reg)
-        scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=20)
+        scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=50)
 
         losses = []
         print(f"Start Euler Training (Method 2: FB+DoubleSampling) for {num_epochs} epochs...")
