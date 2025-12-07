@@ -125,8 +125,14 @@
 
   "//comment": "NEW EULER METHOD CONFIG",
   "solver_method": "euler", 
-  "// options": "bellman or euler",
+  "// options": "bellman or euler or deqn",
   "lr_euler": 0.0001,
   "n_euler_epochs": 200,
-  "n_mc_samples": 10
+  "n_mc_samples": 10,
+  "//": "......",
+  "n_p_output_deqn": 1,
+  "deqn_lr": 0.001,
+  "n_deqn_epochs": 200,
+  "n_mc_samples_deqn": 20,
+  "l2_penalty_deqn": 1e-5
 }

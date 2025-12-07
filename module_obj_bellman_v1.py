@@ -25,6 +25,9 @@ class define_objective:
             extended_min = dist_a_pdf * (1 - config.dist_a_band)
             extended_max = dist_a_pdf * (1 + config.dist_a_band)
             self.ranges.append((extended_min, extended_max))
+            
+        # [ADDITION] Pre-load dist_a_mid tensor for Adapter usage
+        self.dist_a_mid_tensor = torch.tensor(config.dist_a_mid, device=self.device).view(1, -1)
 
     def get_pdf_sampler(self):
         """
@@ -42,60 +45,24 @@ class define_objective:
         x_dist1 = x_batch[:, 2:].to(device)  # Extracts all columns from the 3rd to the last
         return x_z1, x_a1, x_dist1
 
-    # 在 module_obj_bellman_v1.py -> class define_objective 中
-
     def predict_model(self, input_data, function_type='policy'):
-        # 1. 获取原始输出 (Logits)
-        if isinstance(self.model, torch.nn.DataParallel):
-            model_function = self.model.module.f_policy if function_type == 'policy' else self.model.module.f_value
-        else:
-            model_function = self.model.f_policy if function_type == 'policy' else self.model.f_value
-
-        output_logits = model_function(input_data)
-
-        # 2. 适配逻辑
-        if output_logits.shape[1] == 1:
-            # 旧模型 (如果有 Sigmoid inside)，或者 Value Function
-            # 如果移除了内部 Sigmoid，这里的 Value Function 输出也变了，这没问题 (Value 本就是线性的)
-            return output_logits
+        """
+        Unified model prediction wrapper.
+        Delegates to module_basic_v1.predict_model_adapter to handle 
+        different model types (Bellman/Euler/DEQN) and output formats.
+        """
+        # If Value Function, just run it (Value is scalar, no complex transform needed)
+        if function_type == 'value':
+            if isinstance(self.model, torch.nn.DataParallel):
+                return self.model.module.f_value(input_data)
+            else:
+                return self.model.f_value(input_data)
         
-        elif output_logits.shape[1] == 2 and function_type == 'policy':
-            # Euler Model Output: [logit_s, logit_h]
-            
-            # (A) 手动激活 Sigmoid 得到储蓄率 s
-            s = torch.sigmoid(output_logits[:, 0].unsqueeze(1))
-            
-            # (B) 反算 Wealth (同之前逻辑)
-            x_tfp = input_data[:, 0:1]
-            z_min, z_max = config.bounds["z"]["min"], config.bounds["z"]["max"]
-            x_z = input_data[:, 1:2] * (z_max - z_min) + z_min
-            a_min, a_max = config.bounds["a"]["min"], config.bounds["a"]["max"]
-            x_a = input_data[:, 2:3] * (a_max - a_min) + a_min
-            x_dist = input_data[:, 3:]
-            
-            # 计算 K
-            dist_a_mid_tensor = torch.tensor(config.dist_a_mid, device=self.device).view(1, -1)
-            x_a_total = (x_dist * dist_a_mid_tensor).sum(dim=1, keepdim=True)
-            
-            # 计算 w, r
-            x_term = 1 + 1 / config.theta_l
-            int_z_val = np.exp(0.5 * (x_term * config.sigma_z) ** 2)
-            x_int_z = torch.full_like(x_z, int_z_val)
-            x_w, x_l, x_r, _ = self.calculate_aggregates(x_tfp, x_z, x_a_total, x_int_z)
-            
-            # Wealth
-            wealth = (1 + x_r) * x_a + x_w * x_l * x_z
-            
-            # (C) 转换: a' = s * Wealth
-            a_prime = s * wealth
-            
-            # (D) 归一化 a' 到 [0, 1] 以适配 Bellman 接口
-            a_prime_norm = (a_prime - a_min) / (a_max - a_min)
-            a_prime_norm = torch.clamp(a_prime_norm, 0.0, 1.0)
-            
-            return a_prime_norm
-
-        return output_logits
+        # If Policy Function, use the Unified Adapter
+        # Uses self.dist_a_mid_tensor stored in __init__
+        return module_basic_v1.predict_model_adapter(
+            self.model, input_data, config, self.dist_a_mid_tensor, self.device
+        )
 
     def obj_sim_value(self, x_batch, x_n_sim, dist_a_mid, dist_a_mesh):
         pdf_sampler = self.get_pdf_sampler()
@@ -133,6 +100,8 @@ class define_objective:
             x_a0_total = (x_dist0 * dist_a_mid.T).sum(dim=1, keepdim=True).to(self.device)
 
             x_w0, x_l0, x_r0, x_y0 = self.calculate_aggregates(x_tfp0, x_z0, x_a0_total, x_int_z)
+            
+            # Predict Policy using Adapter via self.predict_model
             x_y0_policy = self.predict_model(x_x0_policy_sd, 'policy')
 
             x_a1 = x_y0_policy[:, 0].unsqueeze(1) * (a_max - a_min)
@@ -359,10 +328,8 @@ class define_objective:
             x_r0_path.append(x_r0)
             x_y0_path.append(x_y0)
 
-            if isinstance(self.model, torch.nn.DataParallel):
-                x_y0_policy = self.model.module.f_policy(x_x0_policy_sd)
-            else:
-                x_y0_policy = self.model.f_policy(x_x0_policy_sd)
+            # Use predict_model (Unified Wrapper)
+            x_y0_policy = self.predict_model(x_x0_policy_sd, 'policy')
 
             x_a1 = x_y0_policy[:, 0].unsqueeze(1) * (a_max - a_min)
             x_c0 = (1 + x_r0) * x_a0 + x_w0 * x_l0 * x_z0 - x_a1

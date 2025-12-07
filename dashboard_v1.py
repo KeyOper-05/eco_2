@@ -22,11 +22,12 @@ import torch
 import os
 from datetime import datetime
 import matplotlib.pyplot as plt
+import module_obj_bellman_v1
 import module_basic_v1
-from module_basic_v1 import Config, MyModel, plot_equm_funcs, DomainSampling
+from module_basic_v1 import Config, MyModel, plot_equm_funcs
 from module_training_bellman_v1 import EqumTrainer as BellmanTrainer
 import module_training_euler_v1
-import module_obj_bellman_v1
+import module_training_deqn_v1
 
 # when import the saved models from the expand_model_v1,
 # need to use "load_pretrained_new" to load the model as the way to save is a little different
@@ -72,6 +73,20 @@ start_time = datetime.now()
 dist_a_mid_values = config.dist_a_mid
 dist_a_mid = torch.tensor(dist_a_mid_values).unsqueeze(1).to(device)
 dist_a_mesh = dist_a_mid_values[1] - dist_a_mid_values[0]
+
+# Initial Simulation (Optional, can be skipped if just training)
+# equm_updater = module_obj_bellman_v1.define_objective(model, device)
+# domain_sampler = module_basic_v1.DomainSampling(equm_updater.ranges, device=device)
+# initial_data = domain_sampler.generate_samples(1, config.k_dist)
+# equm_updater.sim_path(initial_data, config.n_sim_path, dist_a_mid, dist_a_mesh)
+
+
+# ==========================================
+# BRANCHING LOGIC BASED ON CONFIG
+# ==========================================
+
+# Determine method from config
+solver_method = getattr(config, 'solver_method', 'bellman')
 
 if config.solver_method == "bellman":
     print(">>> Selected Solver: BELLMAN ITERATION")
@@ -125,35 +140,59 @@ elif config.solver_method == "euler":
     plotter = plot_equm_funcs(num_samples, config.k_dist, dist_a_mid, model, device)
     plotter.create_plot()
 
+elif solver_method == "deqn":
+    print(">>> Selected Solver: DEQN (Direct Residual Minimization)")
+    import module_training_deqn_v1
+    
+    deqn_trainer = module_training_deqn_v1.DEQNTrainer(
+        model, device=device, i_save=config.i_save
+    )
+    
+    n_mc = getattr(config, 'n_mc_samples', 20)
+    
+    model = deqn_trainer.train_policy(
+        num_epochs=config.n_deqn_epochs,
+        n_mc_samples=n_mc,
+        dist_a_mid=dist_a_mid
+    )
+    
+    # Plotting
+    print("Plotting DEQN results...")
+    num_samples = 10000
+    plotter = plot_equm_funcs(num_samples, config.k_dist, dist_a_mid, model, device)
+    plotter.create_plot()
 
-# simluate and plot the path
+elif solver_method == "euler":
+    # (Optional: Keep Euler method code if you still have module_training_euler_v1)
+    pass 
+
+# ==========================================
+# FINAL SIMULATION (Shared Logic)
+# ==========================================
+
 print("Running Simulation Path...")
 
-# 1. 定义目标函数对象 (用于模拟路径)
-# 这一步是为了使用 bellman 模块中写好的 sim_path 和 aggregate 计算逻辑
+# 1. Define objective (using the trained model)
 equm_updater = module_obj_bellman_v1.define_objective(model, device)
 
-# 2. 获取采样器 (修复点)
-# 不要使用 decision_trainer.get_domain_sampler()，因为 euler 模式下没有 decision_trainer
-# 我们直接利用 equm_updater 中的 ranges 重新实例化一个采样器
+# 2. Get generic sampler
 domain_sampler = module_basic_v1.DomainSampling(equm_updater.ranges, device=device)
 
-# 3. 生成初始状态并模拟
+# 3. Generate initial state
 initial_data = domain_sampler.generate_samples(1, config.k_dist)
+
+# 4. Run Simulation
+# This will now use the predict_model -> adapter logic inside bellman_obj
 equm_updater.sim_path(initial_data, config.n_sim_path, dist_a_mid, dist_a_mesh)
 
 def log_memory_usage():
     """Logs GPU memory usage."""
-    print(f"torch.cuda.memory_allocated: {torch.cuda.memory_allocated(0) / 1024 / 1024:.2f}MB")
-    print(f"torch.cuda.memory_reserved: {torch.cuda.memory_reserved(0) / 1024 / 1024:.2f}MB")
-    print(f"torch.cuda.max_memory_reserved: {torch.cuda.max_memory_reserved(0) / 1024 / 1024:.2f}MB")
+    if torch.cuda.is_available():
+        print(f"torch.cuda.memory_allocated: {torch.cuda.memory_allocated(0) / 1024 / 1024:.2f}MB")
+        print(f"torch.cuda.memory_reserved: {torch.cuda.memory_reserved(0) / 1024 / 1024:.2f}MB")
+        print(f"torch.cuda.max_memory_reserved: {torch.cuda.max_memory_reserved(0) / 1024 / 1024:.2f}MB")
 
 
 end_time = datetime.now()
 log_memory_usage()
 print(f'Duration: {end_time - start_time}')
-
-
-
-
-
